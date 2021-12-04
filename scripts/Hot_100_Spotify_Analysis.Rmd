@@ -1,0 +1,374 @@
+---
+title: "Hot 100 Spotify Analysis"
+author: "Marques Chacon"
+date: "12/2/2021"
+output: html_document
+---
+
+```{r, eval = TRUE, include = FALSE, echo = FALSE}
+library(tidyverse)
+library(here)
+library(lubridate)
+library(scales)
+library(ggcorrplot)
+library(relaimpo)
+```
+
+## Introduction - Loading the Necessary Plots
+
+Music plays an instrumental part of my livelihood and I have always wanted to understand exactly what kinds of audio features made a song popular. I have done an analysis on Spotify music before, but for this project, I wanted to look specifically at Billboard music data, specifically the Hot 100 music charts. These charts cover a wide variety of genres, including pop, rock, hip-hop, country, and electronic. What I hope to uncover with this analysis involves identifying relevant audio features for popular songs throughout the decades. I want to analyze which features people like in popular songs, and how it differed across different periods of time. To start with this analysis, I downloaded a csv file off of Kaggle, and loaded it into R:
+
+```{r message=FALSE, warning=FALSE}
+charted_spotify_data <- read_csv(here("data", "charted_spotify_data.csv"))
+charted_spotify_data
+```
+
+## Looking At Monthly Trends
+
+For the first part of my analysis, I decided to look at how monthly trends changed in the Hot 100. Using the Spotify API, I had access to various audio features for different songs. Using the dataset I loaded earlier, I aggregated the data to show monthly data, and calculating the monthly averages for each audio feature:
+
+```{r, warning=FALSE}
+monthly_averages <- charted_spotify_data %>% 
+  mutate(date = mdy(date)) %>%
+  mutate(month_yr = ym(format_ISO8601(date, precision = "ym"))) %>%
+  group_by(month_yr) %>%
+  summarize(mean_popularity = mean(popularity), mean_danceability = mean(danceability),
+            mean_energy = mean(energy),
+            mean_loudness = mean(loudness),
+            mean_acousticness = mean(acousticness),
+            mean_instrumentalness = mean(instrumentalness),
+            mean_liveness = mean(liveness),
+            mean_valence = mean(valence),
+            mean_tempo = mean(tempo),
+            mean_duration = mean(duration_ms))
+monthly_averages
+```
+
+From this data, we notice that there are missing values between the months of May and August 1959. For the purpose of this analysis, I have decided to ignore missing data, since our sample size (756 out of 760 rows) is large enough to compensate for this. After a couple more modifications to our table, we can create a plot that highlights the trends in these features.
+
+```{r, warning=FALSE}
+acoustic_trends <- monthly_averages %>%
+  dplyr::select(-mean_popularity) %>% 
+  gather(audio_feature, measurement, mean_danceability:mean_duration,
+         factor_key = TRUE)
+```
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+audio_features <- list(
+  "mean_danceability" = "Danceability",
+  "mean_energy" = "Energy",
+  "mean_loudness" = "Loudness",
+  "mean_acousticness" = "Acousticness",
+  "mean_instrumentalness" = "Instrumentalness",
+  "mean_liveness" = "Liveness",
+  "mean_valence" = "Valence",
+  "mean_tempo" = "Tempo",
+  "mean_duration" = "Duration"
+)
+audio_labeller <- function(variable, value) {
+  return(audio_features[value])
+}
+```
+```{r message=FALSE, warning=FALSE}
+acoustic_chart <- ggplot(acoustic_trends) +
+  geom_line(aes(month_yr, measurement, group = 1)) +
+  labs(title = "Average Monthly Trends For Hot 100 Songs Across Different Features") +
+  facet_wrap(~audio_feature, nrow = 3, ncol = 3, scales = "free_y",
+             labeller = audio_labeller) +
+  scale_x_date(labels = date_format("%Y"),
+               date_breaks = function(x) seq.Date(as.Date("1960/1/1"),
+                                                  as.Date("2020/1/1"),
+                                                  "10 years"),
+               date_minor_breaks = "1 year") +
+  xlab("") + ylab("Spotify Score") +
+  theme(plot.title = element_text(hjust = 0.5))
+acoustic_chart
+```
+
+These plots show the trends across different features. From these graphs, we notice a few things. Danceability, energy, and loudness have all risen over time since the founding of the Hot 100 chart back in 1958. Meanwhile, acousticness, instrumentalness, liveness, and valence have all decreased since the chart's founding. Some of these are explainable. For instance, the decrease in acousticness can be attributed to the availability of music production in popular music nowadays. It should not be a surprise that the level of electronic and synthesized instruments has only increased. Instrumentalness, which is defined by Spotify as the probability of a song being completely instrumental, has also gone down. This would indicate that instrumental music (no vocals) has decreased in quantity over the years. The increases in danceability, energy, and loudness are a bit harder to explain. These trends would suggest that songs nowadays are more dancable and energetic compared to songs before 1980. This is highly subjective, and requires more investigation into how Spotify determines scores for these. Furthermore, the Spotify scores for songs may suffer recency bias. It might be the case that newer songs are deemed more "danceable" and thus the algorithms (which were created by humans) may not have accounted for this bias. However, these trends might also be true, so I can't conclude the validity of them at this time.
+
+## Looking At Weighted Monthly Trends
+
+For the next part of my analysis, I decided to continue looking at monthly trends in the different audio features, but this time I wanted to control for less popular songs. For instance, I reasoned that a higher-ranked song should count more towards the average for that month than a lower-ranked song. In my previous analysis, I did not weight the ranks of songs. I was curious to see if there would be differences in the resulting graphs.
+
+```{r message=FALSE, warning=FALSE}
+monthly_averages_weighted <- charted_spotify_data %>% 
+  mutate(date = mdy(date)) %>% 
+  mutate(month_yr = ym(format_ISO8601(date, precision = "ym"))) %>%
+  mutate(danceability = danceability/sqrt(rank),
+         energy = energy/sqrt(rank),
+         loudness = loudness/sqrt(rank),
+         acousticness = acousticness/sqrt(rank),
+         instrumentalness = instrumentalness/sqrt(rank),
+         liveness = liveness/sqrt(rank),
+         valence = valence/sqrt(rank),
+         tempo = tempo/sqrt(rank),
+         duration_ms = duration_ms/sqrt(rank)) %>% 
+  group_by(month_yr) %>% 
+  summarize(mean_popularity = mean(popularity),
+            mean_danceability = mean(danceability),
+            mean_energy = mean(energy),
+            mean_loudness = mean(loudness),
+            mean_acousticness = mean(acousticness),
+            mean_instrumentalness = mean(instrumentalness),
+            mean_liveness = mean(liveness),
+            mean_valence = mean(valence),
+            mean_tempo = mean(tempo),
+            mean_duration = mean(duration_ms))
+```
+```{r message=FALSE, warning=FALSE}
+acoustic_trends_weighted <- monthly_averages_weighted %>%
+  dplyr::select(-mean_popularity) %>%
+  gather(audio_feature, measurement, mean_danceability:mean_duration,
+         factor_key = TRUE)
+```
+```{r message=FALSE, warning=FALSE}
+acoustic_chart_weighted <- ggplot(acoustic_trends_weighted) +
+  geom_line(aes(month_yr, measurement, group = 1)) +
+  labs(title = "Average Monthly Trends For Hot 100 Songs Across Different Features (Weighted)") +
+  facet_wrap(~audio_feature, nrow = 3, ncol = 3, scales = "free_y",
+             labeller = audio_labeller) +
+  scale_x_date(labels = date_format("%Y"),
+               date_breaks = function(x) seq.Date(as.Date("1960/1/1"),
+                                                  as.Date("2020/1/1"),
+                                                  "10 years"),
+               date_minor_breaks = "1 year") +
+  xlab("") + ylab("Spotify Score") +
+  theme(plot.title = element_text(hjust = 0.5))
+acoustic_chart_weighted
+```
+
+Looking at these graphs, it is clear that weighting by rank did not affect the graph in any way. Thus, it is clear that the trends associated from the first plot are reflected across most of the songs for a particular time period, not just the most popular.
+
+## Correlations Across Different Audio Features
+
+In the next part of my analysis, we shift gears from looking at historical trends, and focus more on the qualities of music in general. For this, I wanted to create correlation plots that highlight which features had the most impact on each other. This will tell us the variables that have the strongest association with each other. To start, I created a dataset of distinct songs, to avoid counting songs multiple times.
+
+```{r message = FALSE, warning=FALSE}
+distinct_ids <- charted_spotify_data %>%
+  distinct(spotify_id, .keep_all = TRUE)
+distinct_ids
+```
+
+Next, I used this to create a correlation plot. In the following chunk of code, I create `corr` and `pvalue_matrix`, which are matrices that indicate correlation coefficients and p-values for the correlations respectively. I then use this information to create a correlation plot, which highlights the features with the strongest associations with each other.
+```{r message=FALSE, warning=FALSE}
+corr <- distinct_ids[, c(2, 10, 12:13, 15, 17:22)] %>%
+  cor(use="complete.obs") %>%
+  round(1)
+pvalue_matrix <- distinct_ids[, c(2, 10, 12:13, 15, 17:22)] %>% 
+  cor_pmat() %>%
+  round(2)
+corr_matrix <- ggcorrplot(corr, hc.order = TRUE, type = "lower",
+                          p.mat = pvalue_matrix)
+corr_matrix
+```
+
+Looking at this plot, it's clear that there are not very strong associations between different audio features, with the exceptions of loudness vs. energy, which has a fairly strong positive correlation, and acousticness vs. energy, which has a fairly strong negative correlation. We could make the conclusion that for popular music that charts on Billboard charts, there are not very strong correlations on different features. However, this data is limited by the sample. Since this is exclusive to popular music on the Hot 100, it does not represent music as a whole. This may give insight into how popular music is correlated, but not on how songs are generally structured.
+
+## Correlations For Different Monthly Averages
+
+I not only wanted to check correlations for distinct songs, but I also wanted to see if there were correlations over time. My intuition was there would be more stable correlations since we are dealing with aggregate data, and the graphs that we looked at analyzing historical trends showed clear trends for each feature.
+
+```{r message=FALSE, warning=FALSE}
+corr_trends <- monthly_averages %>%
+  dplyr::select(-month_yr) %>%
+  cor(use="complete.obs") %>%
+  round(1)
+pvalue_matrix_trends <- monthly_averages %>%
+  dplyr::select(-month_yr) %>%
+  cor_pmat() %>%
+  round(2)
+corr_matrix_trends <- ggcorrplot(corr_trends, hc.order = TRUE, type = "lower",
+                                 p.mat = pvalue_matrix_trends)
+corr_matrix_trends
+```
+
+As I suspected, there were more clear correlations in this plot. Specifically, acousticness vs. energy, popularity vs. valence, and popularity vs. loudness showed the strongest correlations in this plot. This also seems to infer that Spotify deems more recent songs as more popular, which confirms some of the suspicions I had earlier about how Spotify assigned scores for different features based on the recency of a song. So what do these correlations tell us? In this example, each data point represented a monthly average for Hot 100 Songs. Thus, we can say things like "as the mean popularity for songs played in a given month increases, so does the loudness". Using this information in conjunction with the previous correlation plot we graphed, it would appear that finding correlations for individual songs is more difficult, which points to higher variance among individual data points. The reality is that an individual song can have very unique features. But on the scale of thousands of songs, clear trends are visible.
+
+## Creating a Regression Model
+
+For the last part of my analysis, I wanted to see if I can create a linear regression model to predict the popularity of a song. The following chunk creates a regression model, as well as a plot showing the most important coefficients in our regression equation:
+
+```{r message=FALSE, warning=FALSE}
+fit <- lm(popularity ~ danceability + energy + loudness + acousticness + instrumentalness + liveness + valence + tempo + duration_ms, data=distinct_ids)
+bootresults <- boot.relimp(fit)
+ci <- booteval.relimp(bootresults, norank = T)
+plot(ci)
+```
+
+From this data, it appears that loudness, valence, and acousticness have the strongest impacts on popularity. Some of these correlations could be illustrated in our previous correlation plot, even though that showed aggregate monthly data. Beyond this, we could use this data to predict how popular a song will be. It is important to note though that this analysis does not consider if each association is non-linearly correlated. It is difficult to say for sure if each association has a linear relationship, polynomial relationship, or neither, unless we graphed each individual plot. Our predictive power would be more powerful if we considered more of these nuances in our equations. Alternatively, we could try creating a classification algorithm that classifies popularity and various clustering algorithms that identify meaningful clusters in songs, which could then be used to identify meaningful variables.
+
+## Conclusion
+
+This analysis primarily focused on investigating historical trends in Billboard Hot 100 data using Spotify's API to measure different audio features of a song. While it was difficult to discern any meaningful patterns for individual songs, aggregating songs based on the monthly level showed more distinct patterns, which also helped to reduce variance and produce stronger correlations. As I've noted before, this data is limited by selection bias, especially with regards with trying to generalize correlations with different features. Furthermore, it requires further investigation into regression models, to check if the factors are linearly correlated with each other or not. Finally, it is worth checking how Spotify measures their features, as the algorithms could be inherently biased. If newer songs are indeed more popular, then popularity must be measured in terms of Spotify hits or some kind of measure that reflects very recent data. It would not reflect the relative popularity that older songs had, and would bias against those songs. Regardless, this analysis has provided meaningful insights on what features are popular in today's music, as well as music of the past.
+
+## Appendix
+```{r eval=FALSE}
+# Load the Necessary Libraries
+library(tidyverse)
+library(here)
+library(lubridate)
+library(scales)
+library(ggcorrplot)
+library(relaimpo)
+
+# Load the dataset
+charted_spotify_data <- read_csv(here("data", "charted_spotify_data.csv"))
+
+# Create a Dataset of Distinct Songs
+distinct_ids <- charted_spotify_data %>%
+  distinct(spotify_id, .keep_all = TRUE)
+
+
+# Grouping the dataset by month and identifying averages in different variables
+monthly_averages <- charted_spotify_data %>% 
+  mutate(date = mdy(date)) %>%
+  mutate(month_yr = ym(format_ISO8601(date, precision = "ym"))) %>%
+  group_by(month_yr) %>%
+  summarize(mean_popularity = mean(popularity), mean_danceability = mean(danceability),
+            mean_energy = mean(energy),
+            mean_loudness = mean(loudness),
+            mean_acousticness = mean(acousticness),
+            mean_instrumentalness = mean(instrumentalness),
+            mean_liveness = mean(liveness),
+            mean_valence = mean(valence),
+            mean_tempo = mean(tempo),
+            mean_duration = mean(duration_ms))
+
+# Pulls the audio features that are relevant to analysis
+# gather() converts the table from wide to long format, making it easier to
+# facet the different audio features
+acoustic_trends <- monthly_averages %>%
+  dplyr::select(-mean_popularity) %>% 
+  gather(audio_feature, measurement, mean_danceability:mean_duration,
+         factor_key = TRUE)
+
+# Creating a list to change facet labels to user-friendly labels
+audio_features <- list(
+  "mean_danceability" = "Danceability",
+  "mean_energy" = "Energy",
+  "mean_loudness" = "Loudness",
+  "mean_acousticness" = "Acousticness",
+  "mean_instrumentalness" = "Instrumentalness",
+  "mean_liveness" = "Liveness",
+  "mean_valence" = "Valence",
+  "mean_tempo" = "Tempo",
+  "mean_duration" = "Duration"
+)
+audio_labeller <- function(variable, value) {
+  return(audio_features[value])
+}
+
+# Creating a plot to measure trends across different acoustic features
+acoustic_chart <- ggplot(acoustic_trends) +
+  geom_line(aes(month_yr, measurement, group = 1)) +
+  labs(title = "Average Monthly Trends For Hot 100 Songs Across Different Features") +
+  facet_wrap(~audio_feature, nrow = 3, ncol = 3, scales = "free_y",
+             labeller = audio_labeller) +
+  scale_x_date(labels = date_format("%Y"),
+               date_breaks = function(x) seq.Date(as.Date("1960/1/1"),
+                                                  as.Date("2020/1/1"),
+                                                  "10 years"),
+               date_minor_breaks = "1 year") +
+  xlab("") + ylab("Spotify Score") +
+  theme(plot.title = element_text(hjust = 0.5))
+ggsave(here("output", "Hot_100_Monthly_Trends.png"),
+       acoustic_chart, width=16, height=8.5)
+
+# Weights Hot 100 Songs based on Rank. Higher ranked songs are
+# assigned a higher weight
+monthly_averages_weighted <- charted_spotify_data %>% 
+  mutate(date = mdy(date)) %>% 
+  mutate(month_yr = ym(format_ISO8601(date, precision = "ym"))) %>%
+  mutate(danceability = danceability/sqrt(rank),
+         energy = energy/sqrt(rank),
+         loudness = loudness/sqrt(rank),
+         acousticness = acousticness/sqrt(rank),
+         instrumentalness = instrumentalness/sqrt(rank),
+         liveness = liveness/sqrt(rank),
+         valence = valence/sqrt(rank),
+         tempo = tempo/sqrt(rank),
+         duration_ms = duration_ms/sqrt(rank)) %>% 
+  group_by(month_yr) %>% 
+  summarize(mean_popularity = mean(popularity),
+            mean_danceability = mean(danceability),
+            mean_energy = mean(energy),
+            mean_loudness = mean(loudness),
+            mean_acousticness = mean(acousticness),
+            mean_instrumentalness = mean(instrumentalness),
+            mean_liveness = mean(liveness),
+            mean_valence = mean(valence),
+            mean_tempo = mean(tempo),
+            mean_duration = mean(duration_ms))
+
+# Pulls the Relevant Audio Features
+acoustic_trends_weighted <- monthly_averages_weighted %>%
+  dplyr::select(-mean_popularity) %>%
+  gather(audio_feature, measurement, mean_danceability:mean_duration,
+         factor_key = TRUE)
+
+# Creates a Chart Showing Weighted Values
+acoustic_chart_weighted <- ggplot(acoustic_trends_weighted) +
+  geom_line(aes(month_yr, measurement, group = 1)) +
+  labs(title = "Average Monthly Trends For Hot 100 Songs Across Different Features (Weighted)") +
+  facet_wrap(~audio_feature, nrow = 3, ncol = 3, scales = "free_y",
+             labeller = audio_labeller) +
+  scale_x_date(labels = date_format("%Y"),
+               date_breaks = function(x) seq.Date(as.Date("1960/1/1"),
+                                                  as.Date("2020/1/1"),
+                                                  "10 years"),
+               date_minor_breaks = "1 year") +
+  xlab("") + ylab("Spotify Score") +
+  theme(plot.title = element_text(hjust = 0.5))
+ggsave(here("output", "Hot_100_Monthly_Trends_Weighted.png"),
+       acoustic_chart_weighted, width=16, height=8.5)
+
+# Calculating Correlation Coefficients for Each Numerical Variable, then putting
+# them in a matrix
+corr <- distinct_ids[, c(2, 10, 12:13, 15, 17:22)] %>%
+  cor(use="complete.obs") %>%
+  round(1)
+pvalue_matrix <- distinct_ids[, c(2, 10, 12:13, 15, 17:22)] %>% 
+  cor_pmat() %>%
+  round(2)
+corr_matrix <- ggcorrplot(corr, hc.order = TRUE, type = "lower",
+                          p.mat = pvalue_matrix)
+ggsave(here("output", "Correlation_Matrix_All_Distinct_Songs.png"),
+       corr_matrix, width = 16, height = 8.5)
+
+# Calculating Correlations for the Averages
+corr_trends <- monthly_averages %>%
+  dplyr::select(-month_yr) %>%
+  cor(use="complete.obs") %>%
+  round(1)
+pvalue_matrix_trends <- monthly_averages %>%
+  dplyr::select(-month_yr) %>%
+  cor_pmat() %>%
+  round(2)
+corr_matrix_trends <- ggcorrplot(corr_trends, hc.order = TRUE, type = "lower",
+                                 p.mat = pvalue_matrix_trends)
+ggsave(here("output", "Correlation_Matrix_Monthly_Averages.png"),
+       corr_matrix_trends, width = 16, height = 8.5)
+
+# Calculating Correlations for Weighted Data
+corr_trends_weighted <- monthly_averages_weighted %>%
+  dplyr::select(-month_yr) %>%
+  cor(use="complete.obs") %>%
+  round(1)
+pvalue_matrix_trends_weighted <- monthly_averages_weighted %>%
+  dplyr::select(-month_yr) %>%
+  cor_pmat() %>%
+  round(2)
+corr_matrix_trends_weighted <- ggcorrplot(corr_trends_weighted, hc.order = TRUE,
+                                          type = "lower",
+                                          p.mat = pvalue_matrix_trends_weighted)
+ggsave(here("output", "Correlation_Matrix_Monthly_Averages_Rank_Weighted.png"),
+       corr_matrix_trends_weighted, width = 16, height = 8.5)
+
+# Multiple Linear Regression Model
+fit <- lm(popularity ~ danceability + energy + loudness + acousticness + instrumentalness + liveness + valence + tempo + duration_ms, data=distinct_ids)
+bootresults <- boot.relimp(fit)
+ci <- booteval.relimp(bootresults, norank = T)
+png(here("output", "Relative_Importance_Coefficients.png"))
+plot(ci)
+dev.off()
+```
